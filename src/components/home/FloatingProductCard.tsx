@@ -94,26 +94,6 @@ const FloatingProductCard = ({
   const showRating = typeof rating === "number" && rating > 0;
   const leadBadge = badgeLabel || (showSponsoredBadge ? "FEATURED" : null);
 
-  // JSON-LD for SEO
-  const structuredData = {
-    "@context": "https://schema.org/",
-    "@type": "Product",
-    name: title,
-    image: productImage,
-    ...(showRating && {
-      aggregateRating: {
-        "@type": "AggregateRating",
-        ratingValue: rating,
-        reviewCount: reviewCount || 1,
-      },
-    }),
-    offers: {
-      "@type": "Offer",
-      priceCurrency: "RWF",
-      price: finalPrice > 0 ? finalPrice : undefined,
-      availability: "https://schema.org/InStock",
-    },
-  };
 
   return (
     <article
@@ -121,8 +101,6 @@ const FloatingProductCard = ({
       onClick={handleClick}
       data-product-id={id}
       data-ref-source={refSource}
-      itemScope
-      itemType="https://schema.org/Product"
       className={cn(
         "group relative flex flex-col cursor-pointer overflow-hidden",
         "bg-white rounded-2xl border border-[#F2F2F2]",
@@ -134,11 +112,6 @@ const FloatingProductCard = ({
         showSponsoredBadge && "ring-1 ring-[#FF6B00]/40"
       )}
     >
-      <script
-        type="application/ld+json"
-        // eslint-disable-next-line react/no-danger
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
-      />
 
       {/* Image */}
       <div className="relative aspect-square w-full overflow-hidden bg-[#FAFAFA]">
@@ -149,7 +122,6 @@ const FloatingProductCard = ({
           src={productImage}
           alt={title}
           loading="lazy"
-          itemProp="image"
           onLoad={() => setImageLoaded(true)}
           onError={(e) => {
             e.currentTarget.src = "/placeholder.svg";
@@ -198,7 +170,6 @@ const FloatingProductCard = ({
       <div className="flex flex-col gap-1.5 p-3">
         {/* Title */}
         <h3
-          itemProp="name"
           className="text-[13px] sm:text-sm font-medium text-[#111111] leading-snug line-clamp-2 min-h-[2.5em]"
         >
           {title}
@@ -206,9 +177,6 @@ const FloatingProductCard = ({
 
         {/* Price block */}
         <div
-          itemProp="offers"
-          itemScope
-          itemType="https://schema.org/Offer"
           className="flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5"
         >
           {price <= 0 || isNegotiable ? (
@@ -218,7 +186,6 @@ const FloatingProductCard = ({
           ) : (
             <>
               <span
-                itemProp="price"
                 content={String(finalPrice)}
                 className="font-extrabold text-[15px] sm:text-base text-[#FF6B00] leading-none"
               >
@@ -234,7 +201,6 @@ const FloatingProductCard = ({
                   {currencySymbol || "Fr"} {formatPrice(price)}
                 </span>
               )}
-              <meta itemProp="priceCurrency" content="RWF" />
             </>
           )}
         </div>
@@ -248,17 +214,14 @@ const FloatingProductCard = ({
         {showRating && (
           <div
             className="flex items-center gap-1 text-[11px] text-[#666666]"
-            itemProp="aggregateRating"
-            itemScope
-            itemType="https://schema.org/AggregateRating"
           >
             <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-            <span className="font-semibold text-[#111111]" itemProp="ratingValue">
+            <span className="font-semibold text-[#111111]">
               {rating!.toFixed(1)}
             </span>
             {reviewCount ? (
               <span>
-                (<span itemProp="reviewCount">{reviewCount}</span>)
+                (<span>{reviewCount}</span>)
               </span>
             ) : null}
           </div>
