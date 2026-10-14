@@ -1,0 +1,3 @@
+- Public site URL comes only from `src/config/site.ts` (VITE_SITE_URL) in the app and `supabase/functions/_shared/site.ts` (SITE_URL secret) in Edge Functions — one value to change on domain moves.
+- Cloudinary deletions go through the `cloudinary-cleanup` Edge Function only; it refuses to delete any image still referenced by a product, keeping API secrets server-side.
+- Product static regeneration has exactly one DB entry point: `trg_products_static_insdel` + filtered `trg_products_static_upd` → deduped `generation_queue`; never add per-row HTTP triggers.

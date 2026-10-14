@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.cascade_category_slug() FROM PUBLIC, anon, authenticated;
