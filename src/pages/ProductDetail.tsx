@@ -225,22 +225,16 @@ const ProductDetail = () => {
         const currentPrice = isDiscounted ? getDiscountedPrice(product.price, product.discount!) : product.price;
         return (
           <ProductJsonLd
-            title={product.seo_title || product.title}
+            name={product.seo_title || product.title}
             description={product.seo_description || htmlToText(product.description)}
-            image={product.seo_image || images[0]}
-            images={images}
+            images={[product.seo_image, ...images]}
             url={productUrl}
-            price={currentPrice > 0 ? currentPrice : undefined}
-            originalPrice={isDiscounted ? product.price : undefined}
-            currency={product.currency_code || 'RWF'}
-            seller={product.shop?.name || product.seller?.full_name}
-            location={product.location || undefined}
+            price={currentPrice}
+            currency={product.currency_code}
             category={product.category?.replace(/-/g, ' ')}
             sku={product.id}
-            mpn={product.id}
-            ratingValue={averageRating}
-            ratingCount={totalReviews}
-            brand={product.shop?.name || product.seller?.full_name}
+            soldOut={isProductSoldOut(product)}
+            active={product.status === 'active' || product.status === 'approved'}
           />
         );
       })()}
