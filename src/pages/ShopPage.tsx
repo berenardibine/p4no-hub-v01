@@ -6,7 +6,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { getContent } from '@/lib/cdnGuard';
 import { allowLastResortRead } from '@/lib/apiFirewall';
 import FloatingProductCard from '@/components/home/FloatingProductCard';
-import ProductJsonLd from '@/components/seo/ProductJsonLd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -207,15 +206,6 @@ const ShopPage = () => {
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      {/* SEO */}
-      {shop && (
-        <ProductJsonLd
-          title={`${displayName} — p4no Shop`}
-          description={shop.description || `Browse products from ${displayName} on p4no`}
-          image={avatarUrl || '/og-image.jpg'}
-          url={`${SITE_URL}/shop/${shop.id}`}
-        />
-      )}
 
       {/* Header Bar */}
       <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border/50">

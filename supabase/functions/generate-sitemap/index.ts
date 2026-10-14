@@ -380,7 +380,7 @@ async function genIndex(sb: any) {
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
   for (const e of entries) {
-    xml += `  <sitemap>\n    <loc>${SITE_URL}${e.loc}</loc>\n    <lastmod>${now}</lastmod>\n  </sitemap>\n`;
+    xml += `  <sitemap>\n    <loc>${SITE_URL}${e.loc}</loc>\n  </sitemap>\n`;
   }
   xml += `</sitemapindex>`;
   return xml;
