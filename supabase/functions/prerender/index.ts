@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
       const isUuid = /^[0-9a-f-]{36}$/i.test(key);
       const q = supabase
         .from("products")
-        .select("id,slug,title,description,price,currency_symbol,images,video_url,video_thumbnail,created_at");
+        .select("id,slug,title,description,price,currency_code,status,description_structured,discount,discount_expiry,images,video_url,video_thumbnail,created_at");
       const { data: p } = await (isUuid ? q.eq("id", key) : q.eq("slug", key)).maybeSingle();
       if (!p) return notFound(path);
       const canonical = isReel ? `/reels/${p.slug || p.id}` : `/product/${p.slug || p.id}`;
@@ -160,9 +160,19 @@ Deno.serve(async (req) => {
           "@context": "https://schema.org",
           "@type": "Product",
           name: p.title,
-          description,
-          image: image ? [image] : undefined,
-          offers: p.price ? { "@type": "Offer", price: p.price, priceCurrency: p.currency_symbol || "USD", availability: "https://schema.org/InStock", url: `${SITE_URL}${canonical}` } : undefined,
+          url: `${SITE_URL}${canonical}`,
+          ...(description ? { description } : {}),
+          ...(Array.isArray(p.images) && p.images.some((i: string) => /^https:\/\//.test(i)) ? { image: p.images.filter((i: string) => /^https:\/\//.test(i)).slice(0, 10) } : {}),
+          sku: p.id,
+          ...(() => {
+            const disc = Number(p.discount) > 0 && (!p.discount_expiry || new Date(p.discount_expiry) > new Date());
+            const base = Number(p.price);
+            const price = disc ? Math.round(base * (1 - Number(p.discount) / 100)) : base;
+            if (!Number.isFinite(price) || price <= 0) return {};
+            const cur = /^[A-Z]{3}$/.test(String(p.currency_code || "").toUpperCase()) ? String(p.currency_code).toUpperCase() : "RWF";
+            const out = p.description_structured?.sold_out || !["active", "approved"].includes(p.status);
+            return { offers: { "@type": "Offer", url: `${SITE_URL}${canonical}`, price, priceCurrency: cur, availability: out ? "https://schema.org/OutOfStock" : "https://schema.org/InStock" } };
+          })(),
         });
       }
       return html(shell({ title, description, url: canonical, image, type: isReel ? "video.other" : "product", jsonLd, bodyHtml: `<p>${esc(description)}</p>${image ? `<img src="${esc(image)}" alt="${esc(p.title)}" />` : ""}` }));
