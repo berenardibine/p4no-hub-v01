@@ -3918,6 +3918,7 @@ export type Database = {
       }
       reward_tasks: {
         Row: {
+          approved_count: number
           category: string | null
           color: string | null
           created_at: string
@@ -3932,16 +3933,19 @@ export type Database = {
           icon: string | null
           id: string
           is_active: boolean | null
+          max_participants: number | null
           requirement_count: number | null
           requires_evidence: boolean | null
           reward_coins: number
           reward_points: number
           reward_type: string | null
+          reward_usdt: number | null
           task_type: string
           text_hint: string | null
           title: string
         }
         Insert: {
+          approved_count?: number
           category?: string | null
           color?: string | null
           created_at?: string
@@ -3956,16 +3960,19 @@ export type Database = {
           icon?: string | null
           id?: string
           is_active?: boolean | null
+          max_participants?: number | null
           requirement_count?: number | null
           requires_evidence?: boolean | null
           reward_coins?: number
           reward_points?: number
           reward_type?: string | null
+          reward_usdt?: number | null
           task_type: string
           text_hint?: string | null
           title: string
         }
         Update: {
+          approved_count?: number
           category?: string | null
           color?: string | null
           created_at?: string
@@ -3980,11 +3987,13 @@ export type Database = {
           icon?: string | null
           id?: string
           is_active?: boolean | null
+          max_participants?: number | null
           requirement_count?: number | null
           requires_evidence?: boolean | null
           reward_coins?: number
           reward_points?: number
           reward_type?: string | null
+          reward_usdt?: number | null
           task_type?: string
           text_hint?: string | null
           title?: string
@@ -5490,6 +5499,7 @@ export type Database = {
           reference_type: string | null
           status: string
           usd_equiv: number
+          usdt_amount: number | null
           user_id: string
           wallet_id: string
         }
@@ -5505,6 +5515,7 @@ export type Database = {
           reference_type?: string | null
           status?: string
           usd_equiv?: number
+          usdt_amount?: number | null
           user_id: string
           wallet_id: string
         }
@@ -5520,6 +5531,7 @@ export type Database = {
           reference_type?: string | null
           status?: string
           usd_equiv?: number
+          usdt_amount?: number | null
           user_id?: string
           wallet_id?: string
         }
@@ -5573,6 +5585,10 @@ export type Database = {
           sales_earnings: number
           total_withdrawn: number
           updated_at: string
+          usdt_balance: number
+          usdt_lifetime: number
+          usdt_pending: number
+          usdt_withdrawn: number
           user_id: string
         }
         Insert: {
@@ -5587,6 +5603,10 @@ export type Database = {
           sales_earnings?: number
           total_withdrawn?: number
           updated_at?: string
+          usdt_balance?: number
+          usdt_lifetime?: number
+          usdt_pending?: number
+          usdt_withdrawn?: number
           user_id: string
         }
         Update: {
@@ -5601,6 +5621,10 @@ export type Database = {
           sales_earnings?: number
           total_withdrawn?: number
           updated_at?: string
+          usdt_balance?: number
+          usdt_lifetime?: number
+          usdt_pending?: number
+          usdt_withdrawn?: number
           user_id?: string
         }
         Relationships: []
@@ -5686,8 +5710,10 @@ export type Database = {
           conversion_rate_snapshot: number
           country: string | null
           created_at: string
+          destination: string | null
           id: string
           method: string
+          network: string | null
           paid_at: string | null
           paid_reference: string | null
           payload: Json
@@ -5697,6 +5723,7 @@ export type Database = {
           status: string
           updated_at: string
           usd_amount: number
+          usdt_amount: number | null
           user_id: string
         }
         Insert: {
@@ -5705,8 +5732,10 @@ export type Database = {
           conversion_rate_snapshot: number
           country?: string | null
           created_at?: string
+          destination?: string | null
           id?: string
           method: string
+          network?: string | null
           paid_at?: string | null
           paid_reference?: string | null
           payload: Json
@@ -5716,6 +5745,7 @@ export type Database = {
           status?: string
           updated_at?: string
           usd_amount: number
+          usdt_amount?: number | null
           user_id: string
         }
         Update: {
@@ -5724,8 +5754,10 @@ export type Database = {
           conversion_rate_snapshot?: number
           country?: string | null
           created_at?: string
+          destination?: string | null
           id?: string
           method?: string
+          network?: string | null
           paid_at?: string | null
           paid_reference?: string | null
           payload?: Json
@@ -5735,6 +5767,7 @@ export type Database = {
           status?: string
           updated_at?: string
           usd_amount?: number
+          usdt_amount?: number | null
           user_id?: string
         }
         Relationships: []
@@ -6282,6 +6315,10 @@ export type Database = {
       release_gen_lock: {
         Args: { _holder: string; _name: string }
         Returns: undefined
+      }
+      review_task_submission: {
+        Args: { _id: string; _notes?: string; _status: string }
+        Returns: Json
       }
       reward_claim_approve: { Args: { _claim_id: string }; Returns: undefined }
       reward_claim_reject: {
@@ -6921,6 +6958,10 @@ export type Database = {
           schema_name: string
           table_name: string
         }
+        Returns: string
+      }
+      usdt_withdrawal_create: {
+        Args: { _amount: number; _pay_id: string }
         Returns: string
       }
       user_levels_recompute: { Args: { _user: string }; Returns: undefined }
