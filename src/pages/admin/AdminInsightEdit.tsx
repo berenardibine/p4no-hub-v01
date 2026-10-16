@@ -177,14 +177,17 @@ const AdminInsightEdit = () => {
     setStatus('published');
     const payload = { ...buildPayload(), status: 'published', published_at: publishedAt || new Date().toISOString() };
     setSaveState('saving');
-    if (id) {
-      const { error } = await (supabase as any).from('insight_articles').update(payload).eq('id', id);
+    clearTimeout(autosaveTimer.current); pending.current = null;
+    await chain.current;
+    if (idRef.current) {
+      const { error } = await (supabase as any).from('insight_articles').update(payload).eq('id', idRef.current);
       if (error) { toast({ title: 'Publish failed', description: error.message, variant: 'destructive' }); setSaveState('error'); return; }
     } else {
       const { data, error } = await (supabase as any).from('insight_articles').insert(payload).select('id, slug').single();
       if (error) { toast({ title: 'Publish failed', description: error.message, variant: 'destructive' }); setSaveState('error'); return; }
-      setId(data.id); setSlug(data.slug);
+      idRef.current = data.id; setId(data.id); setSlug(data.slug);
     }
+    lastPayload.current = JSON.stringify({ ...buildPayload(), status: 'published', published_at: payload.published_at });
     setPublishedAt(payload.published_at);
     setSaveState('saved');
     toast({ title: '🚀 Article published' });
