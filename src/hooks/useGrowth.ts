@@ -12,6 +12,10 @@ export interface WalletSummary {
   bonus_earnings: number;
   lifetime_earnings: number;
   total_withdrawn: number;
+  usdt_balance: number | string;
+  usdt_pending: number | string;
+  usdt_lifetime: number | string;
+  usdt_withdrawn: number | string;
 }
 
 export interface RewardClaim {
@@ -27,6 +31,8 @@ export interface Withdrawal {
   id: string;
   points: number;
   usd_amount: number;
+  usdt_amount: number | string | null;
+  destination: string | null;
   method: string;
   status: string;
   created_at: string;

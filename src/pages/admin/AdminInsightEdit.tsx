@@ -96,6 +96,45 @@ const AdminInsightEdit = () => {
     };
   };
 
+  // Saves are serialized: a second save waits for the first, so a new draft is
+  // inserted exactly once and later saves update that same row (no duplicates).
+  const idRef = useRef<string | undefined>(routeId);
+  useEffect(() => { idRef.current = id; }, [id]);
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const pending = useRef<any>(null);
+
+  const persist = (payload: any): Promise<void> => {
+    const key = JSON.stringify(payload);
+    const run = async () => {
+      if (key === lastPayload.current) { setSaveState('saved'); return; }
+      try {
+        if (idRef.current) {
+          const { data, error } = await (supabase as any).from('insight_articles')
+            .update(payload).eq('id', idRef.current).select('id');
+          if (error) throw error;
+          if (!data?.length) throw new Error('Not saved: no permission or article missing');
+        } else {
+          const { data, error } = await (supabase as any)
+            .from('insight_articles').insert(payload).select('id, slug').single();
+          if (error) throw error;
+          idRef.current = data.id;
+          setId(data.id);
+          setSlug(data.slug);
+          window.history.replaceState({}, '', `/admin/insights/${data.id}/edit`);
+        }
+        lastPayload.current = key;
+        if (pending.current && JSON.stringify(pending.current) === key) pending.current = null;
+        setSaveState('saved');
+      } catch (e: any) {
+        setSaveState('error');
+        console.error('Save failed', e);
+        toast({ title: 'Draft not saved', description: e?.message || 'Please try again — your text is kept.', variant: 'destructive' });
+      }
+    };
+    chain.current = chain.current.then(run, run);
+    return chain.current;
+  };
+
   // Autosave (debounced) — only when there's a title and content has changed
   useEffect(() => {
     if (!loaded) return;
@@ -105,44 +144,50 @@ const AdminInsightEdit = () => {
     if (key === lastPayload.current) return;
 
     setSaveState('saving');
+    pending.current = payload;
     clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(async () => {
-      try {
-        if (id) {
-          const { error } = await (supabase as any).from('insight_articles').update(payload).eq('id', id);
-          if (error) throw error;
-        } else {
-          const { data, error } = await (supabase as any)
-            .from('insight_articles').insert(payload).select('id, slug').single();
-          if (error) throw error;
-          setId(data.id);
-          setSlug(data.slug);
-          window.history.replaceState({}, '', `/admin/insights/${data.id}/edit`);
-        }
-        lastPayload.current = key;
-        setSaveState('saved');
-      } catch (e: any) {
-        setSaveState('error');
-        console.error('Autosave failed', e);
-      }
-    }, 900);
-    return () => clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => { persist(payload); }, 900);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, metaDescription, categoryId, bodyHtml, bodyJson, status, loaded]);
+
+  // Flush unsaved changes when leaving the editor or the site.
+  useEffect(() => {
+    const flush = () => {
+      clearTimeout(autosaveTimer.current);
+      if (pending.current) persist(pending.current);
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pending.current) { flush(); e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => { window.removeEventListener('beforeunload', onBeforeUnload); flush(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveNow = async () => {
+    if (!title.trim()) { toast({ title: 'Add a title first', variant: 'destructive' }); return; }
+    clearTimeout(autosaveTimer.current);
+    setSaveState('saving');
+    lastPayload.current = '';
+    await persist(buildPayload());
+  };
 
   const publish = async () => {
     if (!title.trim()) { toast({ title: 'Add a title first', variant: 'destructive' }); return; }
     setStatus('published');
     const payload = { ...buildPayload(), status: 'published', published_at: publishedAt || new Date().toISOString() };
     setSaveState('saving');
-    if (id) {
-      const { error } = await (supabase as any).from('insight_articles').update(payload).eq('id', id);
+    clearTimeout(autosaveTimer.current); pending.current = null;
+    await chain.current;
+    if (idRef.current) {
+      const { error } = await (supabase as any).from('insight_articles').update(payload).eq('id', idRef.current);
       if (error) { toast({ title: 'Publish failed', description: error.message, variant: 'destructive' }); setSaveState('error'); return; }
     } else {
       const { data, error } = await (supabase as any).from('insight_articles').insert(payload).select('id, slug').single();
       if (error) { toast({ title: 'Publish failed', description: error.message, variant: 'destructive' }); setSaveState('error'); return; }
-      setId(data.id); setSlug(data.slug);
+      idRef.current = data.id; setId(data.id); setSlug(data.slug);
     }
+    lastPayload.current = JSON.stringify({ ...buildPayload(), status: 'published', published_at: payload.published_at });
     setPublishedAt(payload.published_at);
     setSaveState('saved');
     toast({ title: '🚀 Article published' });
@@ -196,7 +241,11 @@ const AdminInsightEdit = () => {
               <Button size="sm" variant="outline" onClick={unpublish} className="gap-1.5">
                 <EyeOff className="h-4 w-4" /> Unpublish
               </Button>
-            ) : null}
+            ) : (
+              <Button size="sm" variant="outline" onClick={saveNow} disabled={saveState === 'saving'}>
+                Save draft
+              </Button>
+            )}
             <Button size="sm" onClick={publish} className="gap-1.5 bg-primary">
               <Globe className="h-4 w-4" />{status === 'published' ? 'Update' : 'Publish'}
             </Button>

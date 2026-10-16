@@ -28,8 +28,8 @@ const WalletPage = () => {
   }, [user, wallet]);
 
   if (!user) { navigate("/auth"); return null; }
-  const available = wallet?.balance || 0;
-  const usd = ((available / 100) * rate).toFixed(2);
+  const legacyPoints = wallet?.balance || 0;
+  const u = (v: any) => Number(v || 0).toFixed(2);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -43,18 +43,15 @@ const WalletPage = () => {
       <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
         <Card className="p-5 bg-gradient-to-br from-primary/20 to-primary/5 border-primary/20">
           <div className="flex items-center gap-2 mb-1"><WalletIcon className="w-4 h-4" /><span className="text-xs uppercase tracking-wide">Available</span></div>
-          <div className="text-4xl font-bold">{available} <span className="text-lg font-medium text-muted-foreground">pts</span></div>
-          <div className="text-sm text-muted-foreground mt-1">≈ ${usd} USD</div>
+          <div className="text-4xl font-bold">{u(wallet?.usdt_balance)} <span className="text-lg font-medium text-muted-foreground">USDT</span></div>
+          {legacyPoints > 0 && <div className="text-xs text-muted-foreground mt-1">Legacy points (not converted): {legacyPoints} pts</div>}
           <Button className="w-full mt-4" size="lg" onClick={() => setOpen(true)}>Withdraw</Button>
         </Card>
 
         <div className="grid grid-cols-3 gap-2">
-          <Mini label="Pending" value={wallet?.pending_balance || 0} />
-          <Mini label="Lifetime" value={wallet?.lifetime_earnings || 0} />
-          <Mini label="Withdrawn" value={wallet?.total_withdrawn || 0} />
-          <Mini label="Referral" value={wallet?.referral_earnings || 0} />
-          <Mini label="Action" value={wallet?.action_earnings || 0} />
-          <Mini label="Bonus" value={wallet?.bonus_earnings || 0} />
+          <Mini label="Pending (USDT)" value={u(wallet?.usdt_pending)} />
+          <Mini label="Approved earnings" value={u(wallet?.usdt_lifetime)} />
+          <Mini label="Withdrawn (USDT)" value={u(wallet?.usdt_withdrawn)} />
         </div>
 
         <Tabs defaultValue="ledger">
@@ -71,7 +68,7 @@ const WalletPage = () => {
                   <div className="text-xs text-muted-foreground">{new Date(l.created_at).toLocaleString()} · {l.bucket}</div>
                 </div>
                 <div className={`font-bold ${l.direction === "credit" ? "text-green-500" : "text-red-500"}`}>
-                  {l.direction === "credit" ? "+" : "-"}{l.points}
+                  {l.direction === "credit" ? "+" : "-"}{l.usdt_amount != null ? `${u(l.usdt_amount)} USDT` : `${l.points} pts`}
                 </div>
               </Card>
             ))}
@@ -82,11 +79,11 @@ const WalletPage = () => {
               <Card key={w.id} className="p-3 flex items-center gap-3">
                 <Clock className="w-4 h-4 text-muted-foreground" />
                 <div className="flex-1 text-sm">
-                  <div className="capitalize">{w.method} · {w.points} pts (${Number(w.usd_amount).toFixed(2)})</div>
+                  <div className="capitalize">{w.method} · {w.usdt_amount != null ? `${u(w.usdt_amount)} USDT → ${w.destination}` : `${w.points} pts (legacy)`}</div>
                   <div className="text-xs text-muted-foreground">{new Date(w.created_at).toLocaleString()}</div>
                   {w.rejection_reason && <div className="text-xs text-red-500">{w.rejection_reason}</div>}
                 </div>
-                <Badge variant="outline" className="capitalize">{w.status}</Badge>
+                <Badge variant="outline" className="capitalize">{w.status === 'paid' ? 'Completed (paid manually)' : w.status}</Badge>
               </Card>
             ))}
           </TabsContent>
@@ -98,7 +95,7 @@ const WalletPage = () => {
   );
 };
 
-const Mini = ({ label, value }: { label: string; value: number }) => (
+const Mini = ({ label, value }: { label: string; value: number | string }) => (
   <Card className="p-3 text-center">
     <div className="text-lg font-bold">{value}</div>
     <div className="text-xs text-muted-foreground">{label}</div>

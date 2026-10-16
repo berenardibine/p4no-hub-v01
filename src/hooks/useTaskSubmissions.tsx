@@ -22,6 +22,9 @@ export interface RewardTask {
   description: string;
   reward_points: number;
   reward_coins: number;
+  reward_usdt?: number | string | null;
+  max_participants?: number | null;
+  approved_count?: number;
   task_type: string;
   requirement_count: number;
   icon: string | null;
@@ -112,79 +115,13 @@ export const useAdminTaskSubmissions = () => {
   };
 
   const reviewSubmission = async (submissionId: string, status: 'approved' | 'rejected', adminNotes: string, userId: string, taskId: string) => {
-    // Update submission
-    await (supabase as any)
-      .from('task_submissions')
-      .update({
-        status,
-        admin_notes: adminNotes,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', submissionId);
-
-    if (status === 'approved') {
-      // Find the task to get reward amount
-      const task = tasks.find(t => t.id === taskId);
-      if (task) {
-        // Add reward transaction
-        await (supabase as any)
-          .from('reward_transactions')
-          .insert({
-            user_id: userId,
-            amount: task.reward_points,
-            transaction_type: 'task_reward',
-            task_id: taskId,
-            submission_id: submissionId,
-            description: `Reward for completing: ${task.title}`,
-          });
-
-        // Update user_rewards points
-        const { data: existing } = await supabase
-          .from('user_rewards')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (existing) {
-          await supabase
-            .from('user_rewards')
-            .update({ 
-              points: (existing.points || 0) + task.reward_points,
-              coins: (existing.coins || 0) + task.reward_coins,
-            })
-            .eq('user_id', userId);
-        }
-
-        // Add points to wallet
-        const { data: wallet } = await (supabase as any)
-          .from('wallets')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (wallet) {
-          await (supabase as any)
-            .from('wallets')
-            .update({ balance: wallet.balance + task.reward_points, updated_at: new Date().toISOString() })
-            .eq('user_id', userId);
-        } else {
-          await (supabase as any)
-            .from('wallets')
-            .insert({ user_id: userId, balance: task.reward_points });
-        }
-
-        // Log wallet transaction
-        await (supabase as any)
-          .from('wallet_transactions')
-          .insert({
-            user_id: userId,
-            amount: task.reward_points,
-            type: 'earn',
-            description: `Task reward: ${task.title}`,
-          });
-      }
-    }
+    // Server-side, atomic and idempotent: credits USDT once, enforces people limit.
+    const { data: res, error: rpcErr } = await (supabase as any).rpc('review_task_submission', {
+      _id: submissionId, _status: status, _notes: adminNotes || null,
+    });
+    if (rpcErr) throw rpcErr;
+    if (res?.already) { await fetchAll(); return; }
+    const credited = Number(res?.credited || 0).toFixed(2);
 
     // Send notification
     await supabase
@@ -193,7 +130,7 @@ export const useAdminTaskSubmissions = () => {
         user_id: userId,
         title: status === 'approved' ? 'Task Approved! 🎉' : 'Task Rejected',
         message: status === 'approved'
-          ? `Your task submission was approved! ${tasks.find(t => t.id === taskId)?.reward_points || 0} points added to your wallet.`
+          ? `Your task submission was approved! ${credited} USDT added to your wallet.`
           : `Your task submission was rejected. Reason: ${adminNotes || 'No reason provided.'}`,
         type: status === 'approved' ? 'reward' : 'warning',
       });

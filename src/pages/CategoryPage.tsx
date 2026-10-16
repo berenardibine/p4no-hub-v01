@@ -19,6 +19,8 @@ import { isStrictStaticMode } from '@/lib/staticFlags';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { allowLastResortRead } from '@/lib/apiFirewall';
+import { PRODUCT_CARD_FIELDS } from '@/lib/queryFields';
 
 interface Product {
   id: string;
@@ -55,6 +57,7 @@ const CategoryPage = () => {
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const [trending, setTrending] = useState<Product[]>([]);
   const [recommended, setRecommended] = useState<Product[]>([]);
   const [otherProducts, setOtherProducts] = useState<Product[]>([]);
@@ -82,7 +85,7 @@ const CategoryPage = () => {
 
   const fetchCategoryProducts = async (pageNum: number, isInitial = false) => {
     if (!slug) return;
-    if (isInitial) setLoading(true); else setLoadingMore(true);
+    if (isInitial) { setLoading(true); setLoadError(false); } else setLoadingMore(true);
     try {
       let newItems: Product[] = [];
       // V4 static-first: use paginated category pages (40 per page) written
@@ -99,7 +102,7 @@ const CategoryPage = () => {
         if (idx?.total) setTotalCount(idx.total);
       } else if (pageNum === 0) {
         const cached = await getCachedCategory(slug, 0, 100);
-        if (cached) {
+        if (cached && cached.length > 0) {
           newItems = cached.slice(0, PAGE_SIZE) as Product[];
           setTotalCount(cached.length);
         } else {
@@ -112,6 +115,25 @@ const CategoryPage = () => {
             if (Array.isArray(retry)) newItems = retry.slice(0, PAGE_SIZE);
           }
         }
+      }
+
+      // Static files can be stale/empty (e.g. a category whose static page was
+      // generated before its products existed). Before claiming "no products",
+      // do one sanctioned read with the same visibility rule as the generator
+      // (status = active) so the page never shows a false empty state.
+      if (newItems.length === 0) {
+        if (isStrictStaticMode()) allowLastResortRead('products');
+        const from = pageNum * PAGE_SIZE;
+        const { data, error, count } = await supabase
+          .from('products')
+          .select(PRODUCT_CARD_FIELDS, { count: 'exact' })
+          .eq('category', slug)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        newItems = (data || []) as unknown as Product[];
+        if (typeof count === 'number') setTotalCount(count);
       }
 
       if (isInitial) {
@@ -150,6 +172,8 @@ const CategoryPage = () => {
       }
     } catch (error) {
       console.error('Error fetching category products:', error);
+      if (isInitial) setLoadError(true);
+      setHasMore(false);
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -254,7 +278,7 @@ const CategoryPage = () => {
           <div>
             <h1 className="text-xl font-bold">{category?.name || 'Category'}</h1>
             <p className="text-sm text-muted-foreground">
-              {loading ? 'Loading...' : `${products.length} product${products.length !== 1 ? 's' : ''}`}
+              {loading ? 'Loading...' : loadError ? 'Could not load products' : `${Math.max(totalCount, products.length)} product${Math.max(totalCount, products.length) !== 1 ? 's' : ''}`}
             </p>
           </div>
         </div>
@@ -329,6 +353,12 @@ const CategoryPage = () => {
               </nav>
             )}
           </>
+        ) : loadError ? (
+          <div className="text-center py-10 rounded-2xl border border-border space-y-3">
+            <AlertCircle className="h-7 w-7 text-destructive mx-auto" />
+            <p className="font-semibold">We couldn't load this category's products.</p>
+            <Button onClick={() => slug && fetchCategoryProducts(0, true)}>Try again</Button>
+          </div>
         ) : (
           <div className="space-y-8">
             <div className="text-center py-10 bg-gradient-to-br from-amber-500/10 via-primary/5 to-secondary/5 rounded-2xl border border-amber-500/20">
