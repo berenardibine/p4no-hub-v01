@@ -241,7 +241,11 @@ const AdminInsightEdit = () => {
               <Button size="sm" variant="outline" onClick={unpublish} className="gap-1.5">
                 <EyeOff className="h-4 w-4" /> Unpublish
               </Button>
-            ) : null}
+            ) : (
+              <Button size="sm" variant="outline" onClick={saveNow} disabled={saveState === 'saving'}>
+                Save draft
+              </Button>
+            )}
             <Button size="sm" onClick={publish} className="gap-1.5 bg-primary">
               <Globe className="h-4 w-4" />{status === 'published' ? 'Update' : 'Publish'}
             </Button>
