@@ -40,7 +40,7 @@ const AdminTasks = () => {
   // Task creation
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [taskForm, setTaskForm] = useState({
-    title: '', description: '', task_type: 'social', reward_points: 50,
+    title: '', description: '', task_type: 'social', reward_points: 0, reward_usdt: '0.50', max_participants: '',
     reward_coins: 0, category: 'general', difficulty: 'easy',
     requires_evidence: true, evidence_type: 'screenshot', external_link: '',
     is_active: true, reward_type: 'points', text_hint: '',
@@ -70,11 +70,21 @@ const AdminTasks = () => {
       toast({ title: "Title and description required", variant: "destructive" });
       return;
     }
+    const usdt = String(taskForm.reward_usdt).trim();
+    if (!/^\d{1,4}(\.\d{1,2})?$/.test(usdt) || Number(usdt) <= 0 || Number(usdt) > 1000) {
+      toast({ title: "Reward must be between 0.01 and 1000 USDT (max 2 decimals)", variant: "destructive" });
+      return;
+    }
+    const limitStr = String(taskForm.max_participants).trim();
+    if (limitStr && !/^[1-9]\d{0,5}$/.test(limitStr)) {
+      toast({ title: "People limit must be a whole number above 0", variant: "destructive" });
+      return;
+    }
     try {
-      await createTask(taskForm);
+      await createTask({ ...taskForm, reward_points: 0, reward_type: 'usdt', reward_usdt: usdt, max_participants: limitStr ? Number(limitStr) : null } as any);
       toast({ title: "Task created!" });
       setShowTaskForm(false);
-      setTaskForm({ title: '', description: '', task_type: 'social', reward_points: 50, reward_coins: 0, category: 'general', difficulty: 'easy', requires_evidence: true, evidence_type: 'screenshot', external_link: '', is_active: true, reward_type: 'points', text_hint: '' });
+      setTaskForm({ title: '', description: '', task_type: 'social', reward_points: 0, reward_usdt: '0.50', max_participants: '', reward_coins: 0, category: 'general', difficulty: 'easy', requires_evidence: true, evidence_type: 'screenshot', external_link: '', is_active: true, reward_type: 'points', text_hint: '' });
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     }
@@ -223,7 +233,8 @@ const AdminTasks = () => {
                         </div>
                         <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
                         <div className="flex items-center gap-3 mt-2">
-                          <span className="text-xs font-medium text-primary">{task.reward_points} pts</span>
+                          <span className="text-xs font-medium text-primary">{task.reward_usdt != null ? `${Number(task.reward_usdt).toFixed(2)} USDT` : `${task.reward_points} pts (legacy)`}</span>
+                          {task.max_participants != null && <span className="text-xs text-muted-foreground">{task.approved_count || 0}/{task.max_participants} approved</span>}
                           {task.reward_coins > 0 && <span className="text-xs font-medium text-amber-600">{task.reward_coins} coins</span>}
                           <Badge variant="outline" className="text-xs capitalize">{task.difficulty || 'easy'}</Badge>
                         </div>
@@ -338,12 +349,12 @@ const AdminTasks = () => {
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Reward Points</label>
-                <Input type="number" value={taskForm.reward_points} onChange={e => setTaskForm(p => ({ ...p, reward_points: Number(e.target.value) }))} className="rounded-xl" />
+                <label className="text-xs text-muted-foreground mb-1 block">Reward (USDT)</label>
+                <Input inputMode="decimal" placeholder="0.50" value={taskForm.reward_usdt} onChange={e => setTaskForm(p => ({ ...p, reward_usdt: e.target.value.replace(/[^0-9.]/g, '') }))} className="rounded-xl" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Reward Coins</label>
-                <Input type="number" value={taskForm.reward_coins} onChange={e => setTaskForm(p => ({ ...p, reward_coins: Number(e.target.value) }))} className="rounded-xl" />
+                <label className="text-xs text-muted-foreground mb-1 block">People limit (optional)</label>
+                <Input inputMode="numeric" placeholder="e.g. 200" value={taskForm.max_participants} onChange={e => setTaskForm(p => ({ ...p, max_participants: e.target.value.replace(/\D/g, '') }))} className="rounded-xl" />
               </div>
             </div>
 

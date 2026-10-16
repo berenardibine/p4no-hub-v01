@@ -43,8 +43,8 @@ const AdminWithdrawals = () => {
   };
 
   const exportCsv = () => {
-    const header = "id,user,method,points,usd,status,created_at,paid_at\n";
-    const body = rows.map(r => [r.id, r.user?.email || r.user_id, r.method, r.points, r.usd_amount, r.status, r.created_at, r.paid_at || ""].join(",")).join("\n");
+    const header = "id,user,method,points,usdt,binance_pay_id,status,created_at,paid_at\n";
+    const body = rows.map(r => [r.id, r.user?.email || r.user_id, r.method, r.points, r.usdt_amount ?? r.usd_amount, r.destination || "", r.status, r.created_at, r.paid_at || ""].join(",")).join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `withdrawals-${status}.csv`; a.click();
@@ -76,7 +76,8 @@ const AdminWithdrawals = () => {
               <div className="flex-1 min-w-[200px]">
                 <div className="font-medium">{r.user?.full_name || r.user?.email || r.user_id}</div>
                 <div className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()} · {r.country}</div>
-                <div className="mt-1"><Badge variant="outline" className="capitalize">{r.method}</Badge> <span className="font-bold">{r.points} pts</span> <span className="text-muted-foreground">${Number(r.usd_amount).toFixed(2)}</span></div>
+                <div className="mt-1"><Badge variant="outline" className="capitalize">{r.method}</Badge> {r.usdt_amount != null ? <span className="font-bold">{Number(r.usdt_amount).toFixed(2)} USDT</span> : <><span className="font-bold">{r.points} pts</span> <span className="text-muted-foreground">${Number(r.usd_amount).toFixed(2)}</span></>}</div>
+                {r.destination && <div className="text-sm mt-1">Pay to Binance Pay ID: <span className="font-mono font-bold select-all">{r.destination}</span> <span className="text-xs text-muted-foreground">({r.network})</span></div>}
                 <pre className="text-xs bg-muted rounded p-2 mt-2 overflow-x-auto">{JSON.stringify(r.payload, null, 2)}</pre>
                 {r.rejection_reason && <div className="text-xs text-red-500 mt-1">{r.rejection_reason}</div>}
                 {r.paid_reference && <div className="text-xs mt-1">Ref: {r.paid_reference}</div>}

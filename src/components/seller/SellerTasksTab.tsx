@@ -132,7 +132,8 @@ const SellerTasksTab = () => {
                 </div>
                 <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-primary">{task.reward_points} pts</span>
+                  <span className="text-xs font-bold text-primary">{task.reward_usdt != null ? `${Number(task.reward_usdt).toFixed(2)} USDT` : `${task.reward_points} pts`}</span>
+                  {task.max_participants != null && <span className="text-xs text-muted-foreground">{Math.max(0, task.max_participants - (task.approved_count || 0))} spots left</span>}
                   {task.reward_coins > 0 && <span className="text-xs font-bold text-amber-600">{task.reward_coins} coins</span>}
                   <Badge variant="outline" className="text-[10px] capitalize">{task.task_type}</Badge>
                 </div>
@@ -190,7 +191,7 @@ const SellerTasksTab = () => {
             <div className="space-y-4">
               <div className="bg-muted/50 rounded-xl p-3">
                 <p className="text-sm">{selectedTask.description}</p>
-                <p className="text-xs font-bold text-primary mt-2">Reward: {selectedTask.reward_points} points</p>
+                <p className="text-xs font-bold text-primary mt-2">Reward: {selectedTask.reward_usdt != null ? `${Number(selectedTask.reward_usdt).toFixed(2)} USDT` : `${selectedTask.reward_points} points`}{selectedTask.max_participants != null ? ` · ${Math.max(0, selectedTask.max_participants - (selectedTask.approved_count || 0))} spots left` : ''}</p>
               </div>
 
               {selectedTask.external_link && (

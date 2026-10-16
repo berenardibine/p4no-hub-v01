@@ -22,6 +22,9 @@ export interface RewardTask {
   description: string;
   reward_points: number;
   reward_coins: number;
+  reward_usdt?: number | string | null;
+  max_participants?: number | null;
+  approved_count?: number;
   task_type: string;
   requirement_count: number;
   icon: string | null;
