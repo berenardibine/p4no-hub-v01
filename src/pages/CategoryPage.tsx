@@ -19,6 +19,8 @@ import { isStrictStaticMode } from '@/lib/staticFlags';
 import { supabase } from '@/integrations/supabase/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { allowLastResortRead } from '@/lib/apiFirewall';
+import { PRODUCT_CARD_FIELDS } from '@/lib/queryFields';
 
 interface Product {
   id: string;
@@ -99,7 +101,7 @@ const CategoryPage = () => {
         if (idx?.total) setTotalCount(idx.total);
       } else if (pageNum === 0) {
         const cached = await getCachedCategory(slug, 0, 100);
-        if (cached) {
+        if (cached && cached.length > 0) {
           newItems = cached.slice(0, PAGE_SIZE) as Product[];
           setTotalCount(cached.length);
         } else {
@@ -112,6 +114,25 @@ const CategoryPage = () => {
             if (Array.isArray(retry)) newItems = retry.slice(0, PAGE_SIZE);
           }
         }
+      }
+
+      // Static files can be stale/empty (e.g. a category whose static page was
+      // generated before its products existed). Before claiming "no products",
+      // do one sanctioned read with the same visibility rule as the generator
+      // (status = active) so the page never shows a false empty state.
+      if (newItems.length === 0) {
+        if (isStrictStaticMode()) allowLastResortRead('products');
+        const from = pageNum * PAGE_SIZE;
+        const { data, error, count } = await supabase
+          .from('products')
+          .select(PRODUCT_CARD_FIELDS, { count: 'exact' })
+          .eq('category', slug)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        newItems = (data || []) as unknown as Product[];
+        if (typeof count === 'number') setTotalCount(count);
       }
 
       if (isInitial) {
