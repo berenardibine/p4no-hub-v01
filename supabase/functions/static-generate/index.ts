@@ -296,7 +296,8 @@ const PRODUCT_COLS = `
   id,slug,title,description,price,currency_symbol,images,video_url,video_thumbnail,
   category,status,views,created_at,updated_at,seller_id,shop_id,country,
   minimum_quantity,unlimited_quantity,quantity,contact_call,contact_whatsapp,
-  admin_posted,admin_shop_name,description_structured,
+  admin_posted,admin_shop_name,description_structured,location,rental_unit,
+  sponsored,product_type,currency_code,is_negotiable,discount,discount_expiry,
   seller:profiles!products_seller_id_fkey(id,full_name,profile_image,whatsapp_number,call_number),
   shop:shops(id,name,logo_url,slug)
 `;
@@ -412,6 +413,11 @@ const listCard = (p: any) => ({
   contact_call: p.contact_call, contact_whatsapp: p.contact_whatsapp,
   admin_posted: p.admin_posted, admin_shop_name: p.admin_shop_name,
   seller: p.seller ?? null, shop: p.shop ?? null,
+  status: p.status, country: p.country, location: p.location,
+  description_structured: p.description_structured ? { sold_out: !!p.description_structured.sold_out } : null,
+  rental_unit: p.rental_unit, sponsored: p.sponsored, product_type: p.product_type,
+  currency_code: p.currency_code, is_negotiable: p.is_negotiable,
+  discount: p.discount, discount_expiry: p.discount_expiry,
 });
 
 /** Rows kept in the public listing feeds (UI shows at most ~24 per section). */
@@ -422,6 +428,7 @@ const SHOP_PRODUCTS_LIMIT = 200;
 
 function genProductLists(ctx: RunContext) {
   return ctx.task("product-lists", async () => {
+    await genDiscoveryPages(ctx);
     const [all, latest, featured, popular, trending] = await Promise.all([
       products(ctx, "created", 1000),
       products(ctx, "created", LIST_LIMIT),
@@ -452,6 +459,43 @@ function genProductLists(ctx: RunContext) {
       ctx.stage("products/trending.json", trending),
       ctx.stage("products/search-index.json", searchIndex),
     ];
+  });
+}
+
+// No catalogue cap: bounded DB reads at generation time, bounded CDN reads
+// while browsing. Existing stage hashes skip uploads for unchanged pages.
+function genDiscoveryPages(ctx: RunContext) {
+  return ctx.task('discovery-pages', async () => {
+    const pageSize = 40;
+    let cursor: string | null = null;
+    let buffer: any[] = [];
+    let total = 0;
+    let pageCount = 0;
+    const out = [];
+    while (true) {
+      let query = admin.from('products').select(PRODUCT_COLS)
+        .eq('status', 'active').order('id', { ascending: true }).limit(500);
+      if (cursor) query = query.gt('id', cursor);
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = data ?? [];
+      for (const row of rows) {
+        if ((row as any).description_structured?.sold_out) continue;
+        buffer.push(listCard(row));
+        total++;
+        if (buffer.length === pageSize) {
+          out.push(ctx.stage(`products/discovery/page-${++pageCount}.json`, buffer));
+          buffer = [];
+        }
+      }
+      if (rows.length < 500) break;
+      const last = rows[rows.length - 1];
+      if (!last) break;
+      cursor = last.id;
+    }
+    if (buffer.length) out.push(ctx.stage(`products/discovery/page-${++pageCount}.json`, buffer));
+    out.push(ctx.stage('products/discovery/index.json', { pageCount, pageSize, total }));
+    return out;
   });
 }
 
@@ -860,6 +904,7 @@ async function runJobs(ctx: RunContext, jobs: Job[]): Promise<void> {
         break;
       case "category":
         await genCategories(ctx); await genHomepage(ctx);
+        await genDiscoveryPages(ctx);
         if (category) await genCategoryBundle(ctx, category);
         break;
       case "category-page":
@@ -867,10 +912,12 @@ async function runJobs(ctx: RunContext, jobs: Job[]): Promise<void> {
         break;
       case "shop":
         await genShops(ctx); await genHomepage(ctx);
+        await genDiscoveryPages(ctx);
         if (!isDelete && key) await genShopDetail(ctx, key);
         break;
       case "seller":
         await genHomepage(ctx);
+        await genDiscoveryPages(ctx);
         if (!isDelete && key) {
           await genSellerDetail(ctx, key);
           // Refresh every shop owned by this seller so shop pages show current seller info.
