@@ -1,11 +1,10 @@
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Grid2x2 } from "lucide-react";
 import { useCategories } from "@/hooks/useCategories";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Redis-first (via useCategories → cache-products?type=categories) — no per-render Supabase read.
 const HomeCategoriesGrid = () => {
-  const navigate = useNavigate();
   const { categories, loading } = useCategories();
 
   return (
@@ -28,17 +27,17 @@ const HomeCategoriesGrid = () => {
         </div>
       ) : categories.length === 0 ? null : (
         <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
-          {categories.slice(0, 12).map((c) => (
-            <button
+          {categories.map((c) => (
+            <Link
               key={c.id}
-              onClick={() => navigate(`/category/${c.slug}`)}
+              to={`/category/${c.slug}`}
               className="flex flex-col items-center gap-1.5 p-2.5 rounded-2xl bg-card border border-border/40 hover:border-primary/40 hover:shadow-md transition-all"
             >
               <span className="text-2xl">{c.icon || "📦"}</span>
               <span className="text-[10px] font-medium text-center line-clamp-2 leading-tight">
                 {c.name}
               </span>
-            </button>
+            </Link>
           ))}
         </div>
       )}

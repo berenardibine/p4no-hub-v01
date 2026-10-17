@@ -1,5 +1,5 @@
 import { isProductSoldOut } from '@/lib/productStock';
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Sparkles, Globe, Zap, MapPin, Loader2
@@ -56,38 +56,32 @@ const Index = () => {
   // When preference is 'country_only', pass the detected country
   const feedCountry = isCountryOnly ? country : null;
   
+  const newArrivalsEnabled = useFeature('new_arrivals');
   const { 
     dynamicFeed,
     newArrivals,
-    categorySections,
+    topCategory,
+    exhausted,
+    error,
+    refetch,
+    startNextCycle,
     loading,
     loadingMore,
     hasMore,
     loadMore,
-  } = useDynamicHomeFeed(feedCountry);
+  } = useDynamicHomeFeed(feedCountry, newArrivalsEnabled);
 
   const isSeller = profile?.user_type === 'seller';
-  const newArrivalsEnabled = useFeature('new_arrivals');
-
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const handleSentinelRef = useCallback((node: HTMLDivElement | null) => {
-    sentinelRef.current = node;
-    if (!node) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !loadingMore && !loading) {
-        if (hasMore) {
-          loadMore();
-        } else {
-          // Endless mode: repeat already loaded products
-          setRepeatCycle(c => c + 1);
-        }
-      }
-    }, { rootMargin: '1500px' });
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasMore || loading || loadingMore || error) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) void loadMore();
+    }, { rootMargin: '400px' });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMore, loadingMore, loading, loadMore]);
-
-  const [repeatCycle, setRepeatCycle] = useState(0);
+  }, [hasMore, loadingMore, loading, error, loadMore, dynamicFeed.length]);
 
   const ProductSkeleton = () => (
     <div className="bg-card rounded-2xl p-3 space-y-3 shadow-sm border border-border/30">
@@ -216,19 +210,18 @@ const Index = () => {
           </section>
         )}
 
-        {/* Category Sections */}
-        {!loading && categorySections.map((section, idx) => (
-          <section key={section.category.slug} className="animate-fade-up" style={{ animationDelay: `${0.18 + idx * 0.03}s` }}>
-            <AutoScrollCarousel
-              title={section.category.name}
-              icon={section.category.icon || '📦'}
-              color={section.color}
-              products={section.products}
-              viewAllLink={`/category/${section.category.slug}`}
-              autoScrollInterval={3500 + idx * 500}
+        {/* One category near the top; the rest appear throughout discovery. */}
+        {!loading && topCategory && (
+          <section key={topCategory.category.id} className="animate-fade-up">
+            <CategoryCarousel
+              categoryName={topCategory.category.name}
+              categorySlug={topCategory.category.slug}
+              categoryIcon={topCategory.category.icon || '📦'}
+              categoryColor={topCategory.color}
+              products={topCategory.products}
             />
           </section>
-        ))}
+        )}
 
         {/* Today's Best Deals (cheapest products) */}
         <FeatureGate feature="best_deals">
@@ -262,14 +255,16 @@ const Index = () => {
             </div>
           ) : (
             <div className="space-y-6">
-              {dynamicFeed.map((item, index) => (
-                <div key={`feed-${index}`}>
+              {dynamicFeed.map((item) => (
+                <div key={item.key}>
                   {item.type === 'products' ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                       {(item.data as any[]).map((product) => (
                         <FloatingProductCard
                           key={product.id}
                           id={product.id} soldOut={isProductSoldOut(product as any)}
+                          slug={product.slug || undefined}
+                          location={product.location}
                           title={product.title}
                           price={product.price}
                           images={product.images}
@@ -294,43 +289,6 @@ const Index = () => {
                   )}
                 </div>
               ))}
-              {/* Endless repeat loop once all loaded */}
-              {!hasMore && repeatCycle > 0 && Array.from({ length: repeatCycle }).map((_, cycle) => (
-                <div key={`repeat-${cycle}`} className="space-y-6">
-                  {dynamicFeed.map((item, index) => (
-                    <div key={`repeat-${cycle}-${index}`}>
-                      {item.type === 'products' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                          {(item.data as any[]).map((product, pi) => (
-                            <FloatingProductCard
-                              key={`r-${cycle}-${product.id}-${pi}`}
-                              id={product.id} soldOut={isProductSoldOut(product as any)}
-                              title={product.title}
-                              price={product.price}
-                              images={product.images}
-                              rentalUnit={product.rental_unit}
-                              isSponsored={product.sponsored}
-                              isAdminPosted={product.admin_posted}
-                              isNegotiable={product.is_negotiable}
-                              currencySymbol={product.currency_symbol}
-                              discount={product.discount}
-                              discountExpiry={product.discount_expiry}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <CategoryCarousel
-                          categoryName={(item.data as any).category.name}
-                          categorySlug={(item.data as any).category.slug}
-                          categoryIcon={(item.data as any).category.icon || '📦'}
-                          categoryColor={(item.data as any).color}
-                          products={(item.data as any).products}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ))}
             </div>
           )}
         </section>
@@ -340,15 +298,24 @@ const Index = () => {
           <HomeAds />
         </section>
 
-        {/* Infinite scroll sentinel — never ends, repeats products */}
-        {!loading && dynamicFeed.length > 0 && (
-          <div ref={handleSentinelRef} className="h-12 flex items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        {!loading && hasMore && !error && (
+          <div ref={sentinelRef} className="h-12 flex items-center justify-center">
+            {loadingMore ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> :
+              <Button variant="outline" onClick={loadMore}>Load more</Button>}
+          </div>
+        )}
+        {error && <div role="alert" className="text-center space-y-3">
+          <p className="text-muted-foreground">{error}</p>
+          <Button variant="outline" onClick={dynamicFeed.length ? loadMore : refetch}>Try again</Button>
+        </div>}
+        {!loading && exhausted && !error && (dynamicFeed.length > 0 || newArrivals.length > 0 || topCategory) && (
+          <div className="text-center">
+            <Button variant="outline" onClick={startNextCycle}>Explore again</Button>
           </div>
         )}
 
         {/* Empty State */}
-        {!loading && dynamicFeed.length === 0 && (
+        {!loading && !error && dynamicFeed.length === 0 && newArrivals.length === 0 && !topCategory && (
           <section className="animate-fade-up">
             <div className="text-center py-16 bg-gradient-to-br from-muted/40 to-muted/20 rounded-2xl border border-border/30">
               <Sparkles className="h-12 w-12 text-primary/40 mx-auto mb-4" />

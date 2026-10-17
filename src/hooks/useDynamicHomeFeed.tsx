@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { getCachedList, getCachedCategories } from '@/lib/productCache';
-import { REDIS_ONLY } from '@/lib/cacheFlags';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { getCachedCategories, getDiscoveryIndex, getDiscoveryPage } from '@/lib/productCache';
+import { DiscoveryCycle, categoryMatches, eligibleProduct } from '@/lib/homeDiscovery';
 
 interface Product {
   id: string;
@@ -69,314 +68,168 @@ const iconMap: Record<string, string> = {
   'default': '📦',
 };
 
-// Fisher-Yates shuffle
-const shuffleArray = <T,>(array: T[]): T[] => {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-};
+interface PageBlock { page: number; cycle: number; products: Product[] }
 
-// Cache key
-const SHUFFLE_CACHE_KEY = 'home_feed_cache';
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
-
-export const useDynamicHomeFeed = (userCountry?: string | null) => {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled = true) => {
+  const [blocks, setBlocks] = useState<PageBlock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categorySections, setCategorySections] = useState<CategorySection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const [page, setPage] = useState(0);
-  const PAGE_SIZE = 40;
-  const hasShuffledRef = useRef(false);
-  // Per-country prefetched pages held in memory for instant append
-  const prefetchedRef = useRef<Map<string, Product[]>>(new Map());
-  const inflightRef = useRef<Set<string>>(new Set());
-
-  const pageKey = (p: number) => `${userCountry || 'all'}::${p}`;
-
-  const fetchPageRaw = async (p: number): Promise<Product[]> => {
-    // Static-first: page through the FULL active catalogue (products/all),
-    // not the 60-item "latest" list, so older products stay reachable.
-    // Country filtering happens in memory on the same file (no DB read).
-    try {
-      const all = await getCachedList('all', 0, 100000);
-      if (Array.isArray(all) && all.length > 0) {
-        const rows = (userCountry
-          ? all.filter((r: any) => !r.country || r.country === userCountry)
-          : all) as unknown as Product[];
-        return rows.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE);
-      }
-    } catch (e) {
-      if (REDIS_ONLY) throw e;
-    }
-    if (REDIS_ONLY) return [];
-    const from = p * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    let q = supabase
-      .from('products')
-      .select(`
-        id, title, price, images, category, created_at, views, likes, location,
-        rental_unit, sponsored, product_type, country, currency_code,
-        currency_symbol, is_negotiable, admin_posted, discount, discount_expiry,
-        seller:profiles!products_seller_id_fkey(id, full_name, profile_image)
-      `)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .range(from, to);
-    if (userCountry) q = q.eq('country', userCountry);
-    const { data } = await q;
-    return (data || []) as Product[];
-  };
-
-  const prefetchPage = (p: number) => {
-    const key = pageKey(p);
-    if (prefetchedRef.current.has(key) || inflightRef.current.has(key)) return;
-    inflightRef.current.add(key);
-    fetchPageRaw(p)
-      .then((rows) => {
-        if (rows.length) prefetchedRef.current.set(key, rows);
-      })
-      .catch(() => {})
-      .finally(() => inflightRef.current.delete(key));
-  };
-
-  // Check cache validity
-  const isCacheValid = useMemo(() => {
-    const cached = sessionStorage.getItem(SHUFFLE_CACHE_KEY);
-    if (cached) {
-      const timestamp = parseInt(cached, 10);
-      return Date.now() - timestamp < CACHE_DURATION;
-    }
-    return false;
+  const [hasMore, setHasMore] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const engine = useRef(new DiscoveryCycle(Math.floor(Math.random() * 4294967296)));
+  const count = useRef(0);
+  const busy = useRef(false);
+  const generation = useRef(0);
+  const blocksRef = useRef<PageBlock[]>([]);
+  const commit = useCallback((next: PageBlock[]) => {
+    blocksRef.current = next;
+    setBlocks(next);
   }, []);
 
-  const isInitialLoad = useRef(true);
+  const loadMore = useCallback(async () => {
+    if (busy.current || engine.current.exhausted) return;
+    busy.current = true;
+    setLoadingMore(true);
+    const token = generation.current;
+    try {
+      // Skip empty country pages, but never confuse a failed page with exhaustion.
+      let added = false;
+      while (!engine.current.exhausted && !added) {
+        const page = engine.current.nextPage;
+        if (page === undefined) break;
+        const rows = await getDiscoveryPage(page);
+        if (token !== generation.current) return;
+        if (!Array.isArray(rows)) throw new Error('Products could not be loaded. Please try again.');
+        const products = engine.current.consume(page, rows, userCountry) as Product[];
+        if (products.length) {
+          commit([...blocksRef.current, { page, cycle: engine.current.cycle, products }]);
+          added = true;
+        }
+      }
+      setError(null);
+      setHasMore(!engine.current.exhausted);
+      setExhausted(engine.current.exhausted);
+    } catch (e) {
+      if (token === generation.current) setError(e instanceof Error ? e.message : 'Products could not be loaded.');
+    } finally {
+      if (token === generation.current) {
+        busy.current = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  }, [userCountry, commit]);
+
+  const refetch = useCallback(async () => {
+    const token = ++generation.current;
+    busy.current = true;
+    setLoading(true);
+    try {
+      const [index, cats] = await Promise.all([getDiscoveryIndex(), getCachedCategories()]);
+      if (token !== generation.current) return;
+      if (!index || !Array.isArray(cats)) throw new Error('Products could not be loaded. Please try again.');
+      count.current = index.pageCount;
+      engine.current = new DiscoveryCycle(engine.current.seed);
+      engine.current.reconcile(index.pageCount);
+      setCategories(cats);
+      commit([]);
+      setError(null);
+      setHasMore(index.pageCount > 0);
+      setExhausted(index.pageCount === 0);
+      busy.current = false;
+      if (index.pageCount) await loadMore();
+    } catch (e) {
+      if (token === generation.current) setError(e instanceof Error ? e.message : 'Products could not be loaded.');
+    } finally {
+      if (token === generation.current) { busy.current = false; setLoading(false); }
+    }
+  }, [loadMore, commit]);
 
   useEffect(() => {
-    if (isInitialLoad.current) {
-      fetchData();
-    } else {
-      // Don't show loading skeleton on country change refetch
-      fetchDataSilent();
-    }
-  }, [userCountry]);
+    void refetch();
+    return () => { generation.current++; busy.current = false; };
+  }, [refetch]);
 
-  const fetchDataSilent = async () => {
-    try {
-      await fetchDataInternal(false);
-    } catch (error) {
-      console.error('Error fetching home feed:', error);
-    }
-  };
-
-  const fetchData = async () => {
-    try {
-      await fetchDataInternal(true);
-    } catch (error) {
-      console.error('Error fetching home feed:', error);
-    }
-  };
-
-  const buildSections = (products: Product[], cats: Category[]) => {
-    const sections: CategorySection[] = [];
-    const categoriesWithProducts = cats.filter(cat =>
-      products.some(p => p.category === cat.slug)
-    );
-    const shuffledCats = shuffleArray(categoriesWithProducts);
-    shuffledCats.forEach((cat, index) => {
-      const categoryProducts = products
-        .filter(p => p.category === cat.slug)
-        .slice(0, 12);
-      if (categoryProducts.length >= 1) {
-        sections.push({
-          category: {
-            ...cat,
-            icon: cat.icon || iconMap[cat.type || 'default'] || iconMap['default'],
-          },
-          products: categoryProducts,
-          color: categoryColors[index % categoryColors.length],
-        });
-      }
-    });
-    return sections;
-  };
-
-  const applyFirstPage = (products: Product[], cats: Category[]) => {
-    setCategories(cats);
-    setPage(0);
-    setHasMore(products.length === PAGE_SIZE);
-    if (!hasShuffledRef.current || !isCacheValid) {
-      setAllProducts(shuffleArray(products));
-      hasShuffledRef.current = true;
-      sessionStorage.setItem(SHUFFLE_CACHE_KEY, Date.now().toString());
-    } else {
-      setAllProducts(products);
-    }
-    setCategorySections(buildSections(products, cats));
-    // Sections were built from the first 40 products only, so categories whose
-    // products sat further down were omitted. Rebuild from the full CDN list.
-    getCachedList('all', 0, 1000).then((full) => {
-      if (Array.isArray(full) && full.length > products.length) {
-        setCategorySections(buildSections(full as unknown as Product[], cats));
-      }
-    }).catch(() => {});
-  };
-
-  const fetchDataInternal = async (showLoading: boolean) => {
-    isInitialLoad.current = false;
-
-    // 1) Instant first paint from Redis-backed cache (no country filter only)
-    let paintedFromCache = false;
-    if (!userCountry) {
+  // Revalidate only in response to the existing manifest event; no polling.
+  // Retain sequence positions and IDs while removing newly ineligible rows.
+  useEffect(() => {
+    const refresh = async () => {
+      if (busy.current || loading) return;
+      busy.current = true;
+      const token = generation.current;
       try {
-        const cached = await fetchPageRaw(0);
-        if (Array.isArray(cached) && cached.length > 0) {
-          const cachedProducts = cached as unknown as Product[];
-          // Use cached categories if we already have them, else load from Redis
-          let cats = categories;
-          if (cats.length === 0) {
-            const cachedCats = await getCachedCategories();
-            cats = (cachedCats as unknown as Category[]) || [];
-            if (cats.length === 0 && !REDIS_ONLY) {
-              const { data: catData } = await supabase
-                .from('categories')
-                .select('id, name, slug, icon, type')
-                .order('name');
-              cats = (catData || []) as Category[];
-            }
-          }
-          applyFirstPage(cachedProducts.slice(0, PAGE_SIZE), cats);
-          setLoading(false);
-          paintedFromCache = true;
-          return;
+        const [index, cats] = await Promise.all([getDiscoveryIndex(), getCachedCategories()]);
+        if (!index || !cats || token !== generation.current) return;
+        count.current = index.pageCount;
+        engine.current.reconcile(index.pageCount);
+        const next: PageBlock[] = [];
+        for (const block of blocksRef.current) {
+          if (block.page >= index.pageCount) { next.push({ ...block, products: [] }); continue; }
+          const rows = await getDiscoveryPage(block.page);
+          if (token !== generation.current) return;
+          if (!rows) throw new Error('Updated products could not be loaded. Please try again.');
+          const byId = new Map(rows.map(row => [row.id, row]));
+          const retained = block.products.flatMap(product => {
+            const fresh = byId.get(product.id);
+            return fresh && eligibleProduct(fresh, userCountry) ? [fresh] : [];
+          });
+          const additions = engine.current.consume(block.page, rows, userCountry);
+          next.push({ ...block, products: [...retained, ...additions] as Product[] });
         }
-      } catch (e) {
-        if (REDIS_ONLY) throw e;
-        // ignore, fall back to DB
-      }
-    }
+        commit(next);
+        setCategories(cats);
+        setHasMore(!engine.current.exhausted);
+        setExhausted(engine.current.exhausted);
+      } catch { setError('Updated products could not be loaded. Please try again.'); }
+      finally { if (token === generation.current) busy.current = false; }
+    };
+    window.addEventListener('p4no:manifest-updated', refresh);
+    return () => window.removeEventListener('p4no:manifest-updated', refresh);
+  }, [loading, userCountry, commit]);
 
-    if (showLoading && !paintedFromCache) setLoading(true);
+  const startNextCycle = useCallback(() => {
+    if (busy.current || !engine.current.restart(count.current)) return;
+    setHasMore(count.current > 0);
+    setExhausted(false);
+    void loadMore();
+  }, [loadMore]);
 
-    try {
-      // Country-filtered first page: DB (no per-country Redis slice yet)
-      // Categories list: Redis-first.
-      const [products, cachedCats] = await Promise.all([
-        fetchPageRaw(0),
-        getCachedCategories(),
-      ]);
-      let cats = (cachedCats as unknown as Category[]) || [];
-      if (cats.length === 0 && !REDIS_ONLY) {
-        const { data: catData } = await supabase
-          .from('categories')
-          .select('id, name, slug, icon, type')
-          .order('name');
-        cats = (catData || []) as Category[];
-      }
-      applyFirstPage(products, cats);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMore = async () => {
-    if (loadingMore || !hasMore || loading) return;
-    const next = page + 1;
-    const key = pageKey(next);
-
-    // Instant append if already prefetched
-    const cached = prefetchedRef.current.get(key);
-    if (cached && cached.length > 0) {
-      prefetchedRef.current.delete(key);
-      setAllProducts(prev => [...prev, ...shuffleArray(cached)]);
-      setPage(next);
-      setHasMore(cached.length === PAGE_SIZE);
-      return;
-    }
-
-    setLoadingMore(true);
-    try {
-      const more = await fetchPageRaw(next);
-      setAllProducts(prev => [...prev, ...shuffleArray(more)]);
-      setPage(next);
-      setHasMore(more.length === PAGE_SIZE);
-    } catch (e) {
-      console.error('loadMore error', e);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  // Build the dynamic feed: random products interspersed with category sections
-  const dynamicFeed = useMemo(() => {
-    const feed: Array<{ type: 'products' | 'category'; data: Product[] | CategorySection }> = [];
-    const groupSize = 6;
-    
-    // Split random products into groups
-    const productGroups: Product[][] = [];
-    for (let i = 0; i < allProducts.length; i += groupSize) {
-      productGroups.push(allProducts.slice(i, i + groupSize));
-    }
-
-    // Interleave product groups with category sections
-    let categoryIndex = 0;
-    productGroups.forEach((group, index) => {
-      // Add product group
-      feed.push({ type: 'products', data: group });
-      
-      // After each group, insert a category section if available
-      if (categoryIndex < categorySections.length && index < productGroups.length - 1) {
-        feed.push({ type: 'category', data: categorySections[categoryIndex] });
-        categoryIndex++;
+  const allocation = useMemo(() => {
+    const feed: Array<{ key: string; type: 'products' | 'category'; data: Product[] | CategorySection }> = [];
+    const usedCategories = new Set<string>();
+    const arrivals = arrivalsEnabled ? (blocks[0]?.products.slice(0, 8) || []) : [];
+    const arrivalsIds = new Set(arrivals.map(product => product.id));
+    blocks.forEach((block, blockIndex) => {
+      let remaining = block.products.filter(product => blockIndex !== 0 || !arrivalsIds.has(product.id));
+      let group = 0;
+      while (remaining.length) {
+        // Each category occurs once per cycle and takes ownership of its cards.
+        const cat = categories.find(category => !usedCategories.has(`${block.cycle}:${category.id}`) &&
+          remaining.some(product => categoryMatches(product, category)));
+        if (cat) {
+          usedCategories.add(`${block.cycle}:${cat.id}`);
+          const matching = remaining.filter(product => categoryMatches(product, cat)).slice(0, 6);
+          const ids = new Set(matching.map(product => product.id));
+          remaining = remaining.filter(product => !ids.has(product.id));
+          feed.push({ key: `category-${block.cycle}-${cat.id}`, type: 'category', data: {
+            category: { ...cat, icon: cat.icon || iconMap[cat.type || 'default'] || iconMap.default },
+            products: matching, color: categoryColors[(usedCategories.size - 1) % categoryColors.length],
+          } });
+        }
+        if (remaining.length) {
+          feed.push({ key: `products-${block.cycle}-${block.page}-${group++}`, type: 'products', data: remaining.slice(0, 6) });
+          remaining = remaining.slice(6);
+        }
       }
     });
-    // Any remaining categories (more sections than product groups) go at the end.
-    while (categoryIndex < categorySections.length) {
-      feed.push({ type: 'category', data: categorySections[categoryIndex++] });
-    }
+    const top = feed[0]?.type === 'category' ? feed[0] : null;
+    return { newArrivals: arrivals, topCategory: top?.data as CategorySection | undefined,
+      dynamicFeed: top ? feed.slice(1) : feed };
+  }, [blocks, categories, arrivalsEnabled]);
 
-    return feed;
-  }, [allProducts, categorySections]);
-
-  // Specialized sections
-  const newArrivals = useMemo(() => {
-    return [...allProducts]
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-      .slice(0, 8);
-  }, [allProducts]);
-
-  const assetProducts = useMemo(() => {
-    return allProducts.filter(p => p.product_type === 'asset').slice(0, 8);
-  }, [allProducts]);
-
-  const agricultureProducts = useMemo(() => {
-    return allProducts.filter(p => p.product_type === 'agriculture').slice(0, 8);
-  }, [allProducts]);
-
-  const rentProducts = useMemo(() => {
-    return allProducts.filter(p => p.product_type === 'rent').slice(0, 8);
-  }, [allProducts]);
-
-  return {
-    allProducts,
-    categories,
-    categorySections,
-    dynamicFeed,
-    newArrivals,
-    assetProducts,
-    agricultureProducts,
-    rentProducts,
-    loading,
-    loadingMore,
-    hasMore,
-    loadMore,
-    refetch: fetchData
-  };
+  return { ...allocation, loading, loadingMore, hasMore, exhausted, error, loadMore, refetch, startNextCycle };
 };
 
 export default useDynamicHomeFeed;
