@@ -7,3 +7,4 @@
 5. Unlimited / Sold Out display — done
 6. Rich description editor + tables — done
 7. Static pipeline dedupe + versioned CDN URLs — done
+8. Homepage discovery — in progress: bounded shuffled cycles, shared product IDs, progressive categories, accessible carousel pauses, validation
