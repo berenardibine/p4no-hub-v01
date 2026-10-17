@@ -41,38 +41,11 @@ const CategoryCarousel = ({
 }: CategoryCarouselProps) => {
   const { scrollRef, handlers, scroll: handleScroll } = useCarouselScroll(autoScrollInterval, products.length);
 
-  if (products.length <= 2 || isPaused) return;
-
-    const interval = setInterval(() => {
-      if (scrollRef.current) {
-        const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
-        const maxScroll = scrollWidth - clientWidth;
-        
-        if (scrollLeft >= maxScroll - 10) {
-          scrollRef.current.scrollTo({ left: 0, behavior: 'smooth' });
-        } else {
-          scrollRef.current.scrollTo({ left: scrollLeft + 170, behavior: 'smooth' });
-        }
-      }
-    }, autoScrollInterval);
-
-    return () => clearInterval(interval);
-  }, [products.length, isPaused, autoScrollInterval]);
-
-  const handleScroll = (direction: 'left' | 'right') => {
-    if (!scrollRef.current) return;
-    const amount = 300;
-    scrollRef.current.scrollTo({ 
-      left: scrollRef.current.scrollLeft + (direction === 'left' ? -amount : amount), 
-      behavior: 'smooth' 
-    });
-  };
-
   if (products.length === 0) return null;
 
   return (
     <div 
-      className="animate-fade-up"
+      className="animate-fade-up group"
       {...handlers}
       role="region"
       aria-label={categoryName}

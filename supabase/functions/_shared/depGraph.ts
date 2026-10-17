@@ -54,6 +54,7 @@ export function resolveTargets(ev: ChangeEvent): ResolvedTarget[] {
     case "product": {
       // Feeds always regen. Detail regens on insert/update; DELETE removes it.
       out.push(
+        { path: "products/discovery/index", entity: "product" },
         { path: "products/latest", entity: "product" },
         { path: "products/popular", entity: "product" },
         { path: "products/featured", entity: "product" },
@@ -146,6 +147,7 @@ export function resolveTargets(ev: ChangeEvent): ResolvedTarget[] {
     }
     case "category": {
       out.push(
+        { path: "products/discovery/index", entity: "category" },
         { path: "categories/all", entity: "category" },
         { path: "categories/menu", entity: "category" },
         { path: "categories/home", entity: "category" },
@@ -168,6 +170,7 @@ export function resolveTargets(ev: ChangeEvent): ResolvedTarget[] {
     case "shop":
     case "seller": {
       out.push(
+        { path: "products/discovery/index", entity: "product" },
         { path: "products/latest", entity: "product" },
         { path: "products/popular", entity: "product" },
         { path: "homepage", entity: "homepage" },
