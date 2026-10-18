@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { getCachedCategories, getDiscoveryIndex, getDiscoveryPage } from '@/lib/productCache';
+import { getCachedCategories, getCachedList, getDiscoveryIndex, getDiscoveryPage } from '@/lib/productCache';
 import { DiscoveryCycle, categoryMatches, eligibleProduct } from '@/lib/homeDiscovery';
 
 interface Product {
@@ -73,6 +73,7 @@ interface PageBlock { page: number; cycle: number; products: Product[] }
 export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled = true) => {
   const [blocks, setBlocks] = useState<PageBlock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [arrivals, setArrivals] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -127,12 +128,21 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
     busy.current = true;
     setLoading(true);
     try {
-      const [index, cats] = await Promise.all([getDiscoveryIndex(), getCachedCategories()]);
+      const [index, cats, latest] = await Promise.all([
+        getDiscoveryIndex(), getCachedCategories(), arrivalsEnabled ? getCachedList('latest', 0, 60) : Promise.resolve([]),
+      ]);
       if (token !== generation.current) return;
       if (!index || !Array.isArray(cats)) throw new Error('Products could not be loaded. Please try again.');
       count.current = index.pageCount;
       engine.current = new DiscoveryCycle(engine.current.seed);
       engine.current.reconcile(index.pageCount);
+      const fresh = (latest || []).filter(product => eligibleProduct(product, userCountry)).slice(0, 8);
+      const unique = fresh.filter(product => {
+        if (engine.current.seen.has(product.id)) return false;
+        engine.current.seen.add(product.id);
+        return true;
+      });
+      setArrivals(unique);
       setCategories(cats);
       commit([]);
       setError(null);
@@ -145,7 +155,7 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
     } finally {
       if (token === generation.current) { busy.current = false; setLoading(false); }
     }
-  }, [loadMore, commit]);
+  }, [loadMore, commit, arrivalsEnabled, userCountry]);
 
   useEffect(() => {
     void refetch();
@@ -162,24 +172,37 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
       try {
         const [index, cats] = await Promise.all([getDiscoveryIndex(), getCachedCategories()]);
         if (!index || !cats || token !== generation.current) return;
-        count.current = index.pageCount;
-        engine.current.reconcile(index.pageCount);
-        const next: PageBlock[] = [];
-        for (const block of blocksRef.current) {
-          if (block.page >= index.pageCount) { next.push({ ...block, products: [] }); continue; }
-          const rows = await getDiscoveryPage(block.page);
+        // Read only previously visited pages (including empty country pages).
+        // Build the lookup before mutating seen state so a failed read is retryable.
+        const pages = new Map<number, any[]>();
+        const requested = new Set([...engine.current.visited, ...blocksRef.current.map(block => block.page)]);
+        for (const page of requested) {
+          if (page >= index.pageCount) continue;
+          const rows = await getDiscoveryPage(page);
           if (token !== generation.current) return;
           if (!rows) throw new Error('Updated products could not be loaded. Please try again.');
-          const byId = new Map(rows.map(row => [row.id, row]));
-          const retained = block.products.flatMap(product => {
-            const fresh = byId.get(product.id);
-            return fresh && eligibleProduct(fresh, userCountry) ? [fresh] : [];
-          });
-          const additions = engine.current.consume(block.page, rows, userCountry);
-          next.push({ ...block, products: [...retained, ...additions] as Product[] });
+          pages.set(page, rows);
         }
+        const latest = arrivalsEnabled ? await getCachedList('latest', 0, 60) : [];
+        if (token !== generation.current) return;
+        const byId = new Map([...pages.values()].flat().concat(latest || []).map(row => [row.id, row]));
+        const keep = (products: Product[]) => products.flatMap(product => {
+          const fresh = byId.get(product.id);
+          return fresh && eligibleProduct(fresh, userCountry) ? [fresh] : [];
+        });
+        const next = blocksRef.current.map(block => ({ ...block, products: keep(block.products) }));
+        count.current = index.pageCount;
+        engine.current.reconcile(index.pageCount);
+        for (const [page, rows] of pages) {
+          const additions = engine.current.consume(page, rows, userCountry) as Product[];
+          const block = next.find(value => value.page === page && value.cycle === engine.current.cycle);
+          if (block) block.products.push(...additions);
+          else if (additions.length) next.push({ page, cycle: engine.current.cycle, products: additions });
+        }
+        setArrivals(previous => keep(previous));
         commit(next);
         setCategories(cats);
+        setError(null);
         setHasMore(!engine.current.exhausted);
         setExhausted(engine.current.exhausted);
       } catch { setError('Updated products could not be loaded. Please try again.'); }
@@ -187,7 +210,7 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
     };
     window.addEventListener('p4no:manifest-updated', refresh);
     return () => window.removeEventListener('p4no:manifest-updated', refresh);
-  }, [loading, userCountry, commit]);
+  }, [loading, userCountry, commit, arrivalsEnabled]);
 
   const startNextCycle = useCallback(() => {
     if (busy.current || !engine.current.restart(count.current)) return;
@@ -199,10 +222,8 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
   const allocation = useMemo(() => {
     const feed: Array<{ key: string; type: 'products' | 'category'; data: Product[] | CategorySection }> = [];
     const usedCategories = new Set<string>();
-    const arrivals = arrivalsEnabled ? (blocks[0]?.products.slice(0, 8) || []) : [];
-    const arrivalsIds = new Set(arrivals.map(product => product.id));
-    blocks.forEach((block, blockIndex) => {
-      let remaining = block.products.filter(product => blockIndex !== 0 || !arrivalsIds.has(product.id));
+    blocks.forEach((block) => {
+      let remaining = [...block.products];
       let group = 0;
       while (remaining.length) {
         // Each category occurs once per cycle and takes ownership of its cards.
@@ -227,7 +248,7 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
     const top = feed[0]?.type === 'category' ? feed[0] : null;
     return { newArrivals: arrivals, topCategory: top?.data as CategorySection | undefined,
       dynamicFeed: top ? feed.slice(1) : feed };
-  }, [blocks, categories, arrivalsEnabled]);
+  }, [blocks, categories, arrivals]);
 
   return { ...allocation, loading, loadingMore, hasMore, exhausted, error, loadMore, refetch, startNextCycle };
 };
