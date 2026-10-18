@@ -240,8 +240,15 @@ export const useDynamicHomeFeed = (userCountry?: string | null, arrivalsEnabled 
           } });
         }
         if (remaining.length) {
-          feed.push({ key: `products-${block.cycle}-${block.page}-${group++}`, type: 'products', data: remaining.slice(0, 6) });
-          remaining = remaining.slice(6);
+          // Reserve unseen categories for their own next section, even when
+          // a rare category has only one product in the entire catalogue.
+          const general = remaining.filter(product => !categories.some(category =>
+            !usedCategories.has(`${block.cycle}:${category.id}`) && categoryMatches(product, category))).slice(0, 6);
+          if (general.length) {
+            const ids = new Set(general.map(product => product.id));
+            feed.push({ key: `products-${block.cycle}-${block.page}-${group++}`, type: 'products', data: general });
+            remaining = remaining.filter(product => !ids.has(product.id));
+          }
         }
       }
     });
