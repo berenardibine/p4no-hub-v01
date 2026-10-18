@@ -75,7 +75,7 @@ const Index = () => {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const node = sentinelRef.current;
-    if (!node || !hasMore || loading || loadingMore || error) return;
+    if (!node || !hasMore || loading || loadingMore || error || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) void loadMore();
     }, { rootMargin: '400px' });
@@ -306,7 +306,7 @@ const Index = () => {
         )}
         {error && <div role="alert" className="text-center space-y-3">
           <p className="text-muted-foreground">{error}</p>
-          <Button variant="outline" onClick={dynamicFeed.length ? loadMore : refetch}>Try again</Button>
+          <Button variant="outline" onClick={hasMore ? loadMore : refetch}>Try again</Button>
         </div>}
         {!loading && exhausted && !error && (dynamicFeed.length > 0 || newArrivals.length > 0 || topCategory) && (
           <div className="text-center">
