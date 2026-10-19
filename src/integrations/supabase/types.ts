@@ -2734,6 +2734,108 @@ export type Database = {
           },
         ]
       }
+      product_import_jobs: {
+        Row: {
+          created_at: string
+          duplicate_mode: string
+          filename: string
+          id: string
+          request_key: string
+          seller_id: string
+          shop_id: string
+          status: string
+          total_rows: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          duplicate_mode?: string
+          filename: string
+          id?: string
+          request_key: string
+          seller_id: string
+          shop_id: string
+          status?: string
+          total_rows: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          duplicate_mode?: string
+          filename?: string
+          id?: string
+          request_key?: string
+          seller_id?: string
+          shop_id?: string
+          status?: string
+          total_rows?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_import_jobs_seller_id_fkey"
+            columns: ["seller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_import_jobs_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_import_rows: {
+        Row: {
+          created_at: string
+          error: string | null
+          job_id: string
+          product_id: string | null
+          row_number: number
+          source: Json
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          job_id: string
+          product_id?: string | null
+          row_number: number
+          source: Json
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          job_id?: string
+          product_id?: string | null
+          row_number?: number
+          source?: Json
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_import_rows_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "product_import_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_import_rows_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_impressions: {
         Row: {
           created_at: string
@@ -3089,6 +3191,7 @@ export type Database = {
           share_count: number | null
           shop_id: string | null
           show_connect_button: boolean | null
+          sku: string | null
           slug: string | null
           sponsored: boolean | null
           status: string | null
@@ -3142,6 +3245,7 @@ export type Database = {
           share_count?: number | null
           shop_id?: string | null
           show_connect_button?: boolean | null
+          sku?: string | null
           slug?: string | null
           sponsored?: boolean | null
           status?: string | null
@@ -3195,6 +3299,7 @@ export type Database = {
           share_count?: number | null
           shop_id?: string | null
           show_connect_button?: boolean | null
+          sku?: string | null
           slug?: string | null
           sponsored?: boolean | null
           status?: string | null
@@ -6336,6 +6441,10 @@ export type Database = {
           _user: string
         }
         Returns: string
+      }
+      seller_product_import: {
+        Args: { p_action: string; p_job?: string; p_payload?: Json }
+        Returns: Json
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
